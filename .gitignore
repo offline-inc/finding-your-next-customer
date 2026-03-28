@@ -1,0 +1,21 @@
+# Large data files - zip archives of 12M Google Maps businesses
+google-maps-12m-us-businesses/*.zip
+
+# Filtered CSV outputs (large, regenerable from scripts)
+google-maps-12m-us-businesses/filtered/
+
+# Company lead CSVs (large, regenerable from scripts)
+companies/**/*.csv
+
+# Company lead JSON (large, regenerable from scripts)
+companies/**/*.json
+
+# Pre-existing LineSight state-level data
+companies/linesight/by_state/
+companies/linesight/linesight_leads_national.csv
+companies/linesight/linesight_summary.txt
+
+# Python
+__pycache__/
+*.pyc
+.env
