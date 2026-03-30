@@ -675,15 +675,274 @@ curl -X GET https://api.agentmail.to/v1/domains/yourdomain.com/dns \
 
 ## 2. Prospect Research
 
-### 2a-2b. Enrich Contacts and Companies
+### 2a. Company Search and Enrichment
 
-*(Existing: Apollo. See current registry.)*
+**What it does:** Search for companies by industry, size, location, and keywords. Enrich a known domain with firmographic data (employee count, revenue, industry, tech stack, funding).
+
+**Why it matters:** Before you reach out to a person, you need to know the company is worth reaching out to. Company search lets you build targeted account lists. Company enrichment lets you qualify and personalize.
+
+**Recommendation:** Apollo
+
+#### Agent Setup Instructions
+
+Tell your Claude: "Set up Apollo company search the way GTM Core recommends."
+
+**Search for companies by criteria:**
+
+```python
+import httpx
+
+APOLLO_URL = "https://api.apollo.io/api/v1"
+
+async def search_companies(
+    api_key: str,
+    locations: list[str] | None = None,
+    employee_ranges: list[str] | None = None,
+    keywords: list[str] | None = None,
+    industry_tag_ids: list[str] | None = None,
+    per_page: int = 25,
+    page: int = 1,
+) -> dict:
+    """Search Apollo for companies matching criteria.
+
+    Args:
+        locations: e.g. ["Chicago, Illinois", "California, United States"]
+        employee_ranges: e.g. ["1,10", "11,50", "51,200"]
+        keywords: e.g. ["solar installer", "kitchen remodel"]
+        industry_tag_ids: Apollo industry tags (get from their docs)
+        per_page: max 100
+        page: pagination
+    """
+    payload = {"per_page": per_page, "page": page}
+    if locations:
+        payload["organization_locations"] = locations
+    if employee_ranges:
+        payload["organization_num_employees_ranges"] = employee_ranges
+    if keywords:
+        payload["q_organization_keyword_tags"] = keywords
+    if industry_tag_ids:
+        payload["organization_industry_tag_ids"] = industry_tag_ids
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{APOLLO_URL}/mixed_companies/search",
+            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    companies = []
+    for org in data.get("organizations", []):
+        companies.append({
+            "name": org.get("name"),
+            "domain": org.get("primary_domain"),
+            "industry": org.get("industry"),
+            "employee_count": org.get("estimated_num_employees"),
+            "city": org.get("city"),
+            "state": org.get("state"),
+            "country": org.get("country"),
+            "linkedin_url": org.get("linkedin_url"),
+            "phone": org.get("phone"),
+            "founded_year": org.get("founded_year"),
+            "keywords": org.get("keywords", []),
+        })
+    return {
+        "companies": companies,
+        "total": data.get("pagination", {}).get("total_entries", 0),
+        "page": page,
+    }
+```
+
+**Quick curl version:**
+
+```bash
+# Search for solar installers in California with 1-50 employees
+curl -X POST https://api.apollo.io/api/v1/mixed_companies/search \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $APOLLO_API_KEY" \
+  -d '{
+    "organization_locations": ["California, United States"],
+    "organization_num_employees_ranges": ["1,50"],
+    "q_organization_keyword_tags": ["solar installer"],
+    "per_page": 25
+  }'
+```
+
+**Enrich a single company by domain:**
+
+```python
+async def enrich_company(api_key: str, domain: str) -> dict:
+    """Get detailed firmographic data for a known company domain."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{APOLLO_URL}/organizations/enrich",
+            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
+            json={"domain": domain},
+        )
+        resp.raise_for_status()
+        org = resp.json().get("organization", {})
+
+    return {
+        "name": org.get("name"),
+        "domain": domain,
+        "industry": org.get("industry"),
+        "employee_count": org.get("estimated_num_employees"),
+        "annual_revenue": org.get("annual_revenue_printed"),
+        "city": org.get("city"),
+        "state": org.get("state"),
+        "country": org.get("country"),
+        "description": org.get("short_description"),
+        "linkedin_url": org.get("linkedin_url"),
+        "phone": org.get("phone"),
+        "founded_year": org.get("founded_year"),
+        "technologies": org.get("current_technologies", []),
+        "keywords": org.get("keywords", []),
+        "funding_total": org.get("total_funding_printed"),
+        "latest_funding_round": org.get("latest_funding_round_type"),
+        "seo_description": org.get("seo_description"),
+    }
+```
+
+**Quick curl version:**
+
+```bash
+# Enrich a company by domain
+curl -X POST https://api.apollo.io/api/v1/organizations/enrich \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $APOLLO_API_KEY" \
+  -d '{"domain": "acme.com"}'
+```
+
+**Useful search filters:**
+
+| Filter | Example | What it does |
+|--------|---------|-------------|
+| `organization_locations` | `["Chicago, Illinois"]` | Filter by city, state, or country |
+| `organization_num_employees_ranges` | `["1,10", "11,50"]` | Filter by employee count |
+| `q_organization_keyword_tags` | `["solar", "HVAC"]` | Search by industry keywords |
+| `organization_industry_tag_ids` | (Apollo-specific IDs) | Filter by Apollo's industry taxonomy |
+| `per_page` | `100` | Results per page (max 100) |
+
+**Caveat:** Apollo's free tier gives you 10K records/month. Company searches count against this. All provider data is stale (refreshed monthly/quarterly). Always pair with website scraping (FireCrawl) for current info.
+
+**Keys needed:** `APOLLO_API_KEY`
+
+---
+
+### 2b. Contact Enrichment
+
+**What it does:** Given a person's name and company, return their email, phone, title, LinkedIn URL, and other contact details.
+
+**Recommendation:** Apollo
+
+```python
+async def enrich_contact(api_key: str, first_name: str, last_name: str,
+                         domain: str | None = None,
+                         linkedin_url: str | None = None) -> dict:
+    """Enrich a person's contact details via Apollo."""
+    payload = {"first_name": first_name, "last_name": last_name}
+    if domain:
+        payload["domain"] = domain
+    if linkedin_url:
+        payload["linkedin_url"] = linkedin_url
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{APOLLO_URL}/people/match",
+            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
+            json=payload,
+        )
+        resp.raise_for_status()
+        person = resp.json().get("person", {})
+
+    return {
+        "name": f"{person.get('first_name', '')} {person.get('last_name', '')}".strip(),
+        "email": person.get("email"),
+        "title": person.get("title"),
+        "company": person.get("organization", {}).get("name"),
+        "linkedin_url": person.get("linkedin_url"),
+        "phone": person.get("phone_numbers", [{}])[0].get("sanitized_number") if person.get("phone_numbers") else None,
+        "city": person.get("city"),
+        "state": person.get("state"),
+    }
+```
+
+```bash
+# Quick curl: enrich a contact
+curl -X POST https://api.apollo.io/api/v1/people/match \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $APOLLO_API_KEY" \
+  -d '{"first_name": "Alex", "last_name": "Johnson", "domain": "acme.com"}'
+```
+
+**Keys needed:** `APOLLO_API_KEY`
+
+---
 
 ### 2c. People Search (Find Employees at a Company)
 
 **What it does:** Given a company domain, return all people matching criteria with their emails, titles, and LinkedIn URLs.
 
+**Why it matters:** You found the company. Now you need the right person at that company. People search lets you filter by title, seniority, and department to find your buyer.
+
 **Recommendation:** Apollo
+
+```python
+async def search_people(
+    api_key: str,
+    domains: list[str] | None = None,
+    titles: list[str] | None = None,
+    seniority: list[str] | None = None,
+    per_page: int = 25,
+    page: int = 1,
+) -> dict:
+    """Search for people at specific companies by title and seniority.
+
+    Args:
+        domains: e.g. ["acme.com", "bigcorp.com"]
+        titles: e.g. ["VP of Operations", "Director of Facilities"]
+        seniority: e.g. ["vp", "director", "c_suite", "owner", "founder"]
+        per_page: max 100
+    """
+    payload = {"per_page": per_page, "page": page}
+    if domains:
+        payload["organization_domains"] = domains
+    if titles:
+        payload["person_titles"] = titles
+    if seniority:
+        payload["person_seniorities"] = seniority
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{APOLLO_URL}/mixed_people/search",
+            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    people = []
+    for p in data.get("people", []):
+        people.append({
+            "name": f"{p.get('first_name', '')} {p.get('last_name', '')}".strip(),
+            "email": p.get("email"),
+            "title": p.get("title"),
+            "company": p.get("organization", {}).get("name"),
+            "domain": p.get("organization", {}).get("primary_domain"),
+            "linkedin_url": p.get("linkedin_url"),
+            "seniority": p.get("seniority"),
+            "city": p.get("city"),
+            "state": p.get("state"),
+        })
+    return {
+        "people": people,
+        "total": data.get("pagination", {}).get("total_entries", 0),
+        "page": page,
+    }
+```
+
+**Quick curl version:**
 
 ```bash
 curl -X POST https://api.apollo.io/api/v1/mixed_people/search \

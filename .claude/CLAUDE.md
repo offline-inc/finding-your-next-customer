@@ -668,9 +668,59 @@ curl -X GET https://api.agentmail.to/v1/domains/yourdomain.com/dns \
 
 ## 2. Prospect Research
 
-### 2a-2b. Enrich Contacts and Companies
+### 2a. Company Search and Enrichment
 
-*(Existing: Apollo. See current registry.)*
+**What it does:** Search for companies by industry, size, location, and keywords. Enrich a known domain with firmographic data.
+
+**Recommendation:** Apollo
+
+**Search for companies:**
+
+```bash
+curl -X POST https://api.apollo.io/api/v1/mixed_companies/search \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $APOLLO_API_KEY" \
+  -d '{
+    "organization_locations": ["California, United States"],
+    "organization_num_employees_ranges": ["1,50"],
+    "q_organization_keyword_tags": ["solar installer"],
+    "per_page": 25
+  }'
+```
+
+**Enrich a company by domain:**
+
+```bash
+curl -X POST https://api.apollo.io/api/v1/organizations/enrich \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $APOLLO_API_KEY" \
+  -d '{"domain": "acme.com"}'
+```
+
+**Useful filters:** `organization_locations`, `organization_num_employees_ranges`, `q_organization_keyword_tags`, `per_page` (max 100).
+
+**Caveat:** Free tier = 10K records/month. Data is stale (refreshed monthly/quarterly). Pair with FireCrawl for current info.
+
+**Keys needed:** `APOLLO_API_KEY`
+
+---
+
+### 2b. Contact Enrichment
+
+**What it does:** Given a person's name and company, return their email, phone, title, LinkedIn URL.
+
+**Recommendation:** Apollo
+
+```bash
+curl -X POST https://api.apollo.io/api/v1/people/match \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $APOLLO_API_KEY" \
+  -d '{"first_name": "Alex", "last_name": "Johnson", "domain": "acme.com"}'
+```
+
+**Keys needed:** `APOLLO_API_KEY`
+
+---
 
 ### 2c. People Search (Find Employees at a Company)
 
@@ -684,6 +734,8 @@ curl -X POST https://api.apollo.io/api/v1/mixed_people/search \
   -H "X-Api-Key: $APOLLO_API_KEY" \
   -d '{"organization_domains": ["acme.com"], "person_titles": ["marketing"], "per_page": 25}'
 ```
+
+**Seniority filters:** `"person_seniorities": ["vp", "director", "c_suite", "owner", "founder"]`
 
 **Caveat:** All provider data is stale. They refresh monthly or quarterly. Always pair with LinkedIn validation (2d).
 
