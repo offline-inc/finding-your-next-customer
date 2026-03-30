@@ -1,5 +1,5 @@
-# Large data files - zip archives of 12M Google Maps businesses
-google-maps-12m-us-businesses/*.zip
+# Filtered CSV outputs (regenerable from scripts)
+# NOTE: The source zip files ARE tracked in git (426MB across 13 parts)
 
 # Filtered CSV outputs (large, regenerable from scripts)
 google-maps-12m-us-businesses/filtered/
